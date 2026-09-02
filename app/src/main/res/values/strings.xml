@@ -7,8 +7,8 @@
     <string name="btn_enable_accessibility">Enable in system settings</string>
     <string name="btn_test_animation">Test animation</string>
     <string name="pref_sound_label">Animation sound</string>
-    <string name="btn_miui_autostart">Auto-start (MIUI)</string>
-    <string name="btn_miui_battery">Battery saver (MIUI)</string>
+    <string name="btn_miui_autostart">Auto-start</string>
+    <string name="btn_miui_battery">Battery saver</string>
     <string name="miui_suggestion_text">On MIUI / HyperOS and other non-stock systems, enable auto-start and set the battery policy to \"No restrictions\", otherwise the accessibility service may be killed by the system.</string>
     <string name="github_repo_label">GitHub: woods-marshes/MJ</string>
     <string name="dialog_disclaimer_title">Disclaimer</string>
