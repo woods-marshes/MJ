@@ -1,0 +1,18 @@
+<resources>
+    <string name="app_name">MJ</string>
+    <string name="accessibility_service_description">Detects when the text \"mj\" is sent in any app and plays a Spider-Man animation over the screen.</string>
+    <string name="status_label">Accessibility service</string>
+    <string name="status_on">Enabled</string>
+    <string name="status_off">Disabled</string>
+    <string name="btn_enable_accessibility">Enable in system settings</string>
+    <string name="btn_test_animation">Test animation</string>
+    <string name="pref_sound_label">Animation sound</string>
+    <string name="btn_miui_autostart">Auto-start (MIUI)</string>
+    <string name="btn_miui_battery">Battery saver (MIUI)</string>
+    <string name="miui_suggestion_text">On MIUI / HyperOS and other non-stock systems, enable auto-start and set the battery policy to \"No restrictions\", otherwise the accessibility service may be killed by the system.</string>
+    <string name="github_repo_label">GitHub: woods-marshes/MJ</string>
+    <string name="dialog_disclaimer_title">Disclaimer</string>
+    <string name="dialog_disclaimer_text">This app uses an accessibility service to watch input events and plays a local Spider-Man animation with sound when \"mj\" is sent.\n\n• Fully offline: no network access, no data collection\n• Does not modify the system or harm your device\n• Make sure you downloaded it from the official repository: github.com/woods-marshes/MJ\n\nFor learning and exchange purposes only — please delete within 24 hours of downloading. Spider-Man and related characters are trademarks of Marvel / Disney. Animation assets come from the open-source project Tiktok-MJ-for-Wechat.</string>
+    <string name="dialog_disclaimer_confirm">I understand &amp; agree</string>
+    <string name="main_hint">Type \"mj\" in any app\'s input box and tap send — the Spider-Man animation will play on top of the screen.</string>
+</resources>

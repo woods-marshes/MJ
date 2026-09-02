@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">MJ</string>
+    <string name="accessibility_service_description">检测到在任意应用中发送"mj"时，在屏幕上播放蜘蛛侠动画。</string>
+    <string name="status_label">无障碍服务</string>
+    <string name="status_on">已开启</string>
+    <string name="status_off">未开启</string>
+    <string name="btn_enable_accessibility">去系统设置开启</string>
+    <string name="btn_test_animation">测试动画</string>
+    <string name="pref_sound_label">动画音效</string>
+    <string name="btn_miui_autostart">自启动管理（MIUI）</string>
+    <string name="btn_miui_battery">省电策略（MIUI）</string>
+    <string name="miui_suggestion_text">建议 MIUI / HyperOS 等非原生系统开启自启动，并将省电策略改为「无限制」，否则无障碍服务可能被系统回收。</string>
+    <string name="github_repo_label">GitHub：woods-marshes/MJ</string>
+    <string name="dialog_disclaimer_title">免责声明</string>
+    <string name="dialog_disclaimer_text">本应用通过无障碍服务监听输入与点击事件，检测到发送"mj"后，在本地全屏播放蜘蛛侠动画与音效。\n\n• 完全本地运行：不联网、不上传、不收集任何数据\n• 不修改系统、不破坏设备\n• 请确认仅从 GitHub 官方仓库下载：github.com/woods-marshes/MJ\n\n本应用仅供学习交流使用，请于下载后 24 小时内删除。蜘蛛侠形象及相关版权归 Marvel / Disney 所有，动画素材来自开源项目 Tiktok-MJ-for-Wechat。</string>
+    <string name="dialog_disclaimer_confirm">我已知晓并同意</string>
+    <string name="main_hint">在任意应用的输入框输入 mj 并点击发送，蜘蛛侠动画就会覆盖全屏播放。</string>
+</resources>

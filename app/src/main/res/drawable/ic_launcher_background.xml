@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 蜘蛛红底 + 暗纹蛛网 -->
+    <path
+        android:fillColor="#C62828"
+        android:pathData="M0,0 H108 V108 H0 Z"/>
+    <path
+        android:strokeColor="#26FFFFFF"
+        android:strokeWidth="1"
+        android:pathData="M54,54 L0,0 M54,54 L108,0 M54,54 L0,108 M54,54 L108,108 M54,54 L54,0 M54,54 L54,108 M54,54 L0,54 M54,54 L108,54"/>
+    <path
+        android:strokeColor="#1FFFFFFF"
+        android:strokeWidth="1"
+        android:pathData="M54,20 A34,34 0 1 1 53.99,20 Z M54,36 A18,18 0 1 1 53.99,36 Z"/>
+</vector>
