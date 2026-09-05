@@ -4,8 +4,6 @@
     <string name="status_label">Accessibility service</string>
     <string name="status_on">Enabled</string>
     <string name="status_off">Disabled</string>
-    <string name="status_not_bound">Service not running — toggle the accessibility switch off and on</string>
-    <string name="status_stale">Enabled, but no event response for %1$d s (possibly restricted by the system)</string>
     <string name="btn_enable_accessibility">Enable in system settings</string>
     <string name="btn_test_animation">Test animation</string>
     <string name="pref_sound_label">Animation sound</string>

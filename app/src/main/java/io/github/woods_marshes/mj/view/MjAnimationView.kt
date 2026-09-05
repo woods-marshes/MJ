@@ -124,6 +124,7 @@ class MjAnimationView constructor(
         override fun run() {
             var codec: MediaCodec? = null
             var source: VideoSource? = null
+            var decoderSurface: Surface? = null
             try {
                 if (!setupEgl(surface)) {
                     reportError("EGL/GPU 初始化失败")
@@ -134,14 +135,15 @@ class MjAnimationView constructor(
                 textureId = createOesTexture()
                 val texture = SurfaceTexture(textureId)
                 surfaceTexture = texture
-                decodeSurface = Surface(texture)
+                decoderSurface = Surface(texture)
+                decodeSurface = decoderSurface
 
                 source = openVideo()
                 // 彩色画面只占视频右半边，显示宽高按一半计算
                 computeQuadScale(source.colorWidth.toFloat(), source.height.toFloat())
 
                 // 第一次尝试：系统默认解码器（通常硬解）
-                codec = createDecoder(source.format, decodeSurface, preferSw = false, failedName = null)
+                codec = createDecoder(source.format, decoderSurface, preferSw = false, failedName = null)
                 codec.start()
 
                 if (playSound) prepareAudio()
@@ -150,6 +152,11 @@ class MjAnimationView constructor(
                 if (cancelled) return
                 SimpleLog.d(TAG, "Playback attempt failed: $e")
                 // 硬解运行期失败：重开视频源、强制软解重建解码器再完整重试一次
+                val ds = decoderSurface
+                if (ds == null) {
+                    reportError("内部状态异常：解码表面未就绪")
+                    return
+                }
                 try {
                     runCatching { codec?.stop() }
                     runCatching { codec?.release() }
@@ -158,7 +165,7 @@ class MjAnimationView constructor(
                     source = openVideo()
                     computeQuadScale(source.colorWidth.toFloat(), source.height.toFloat())
                     restartAudio()
-                    codec = createDecoder(source.format, decodeSurface, preferSw = true, failedName = null)
+                    codec = createDecoder(source.format, ds, preferSw = true, failedName = null)
                     codec.start()
                     SimpleLog.d(TAG, "Retrying with software decoder")
                     playLoop(codec, source.extractor)
