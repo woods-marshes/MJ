@@ -142,8 +142,10 @@ class MjAnimationView constructor(
                 // 彩色画面只占视频右半边，显示宽高按一半计算
                 computeQuadScale(source.colorWidth.toFloat(), source.height.toFloat())
 
-                // 第一次尝试：系统默认解码器（通常硬解）
-                codec = createDecoder(source.format, decoderSurface, preferSw = false, failedName = null)
+                // 第一次尝试：系统默认解码器（通常硬解）；该设备曾硬解失败则直接软解
+                val preferSw = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                    .getBoolean(KEY_PREFER_SW, false)
+                codec = createDecoder(source.format, decoderSurface, preferSw = preferSw, failedName = null)
                 codec.start()
 
                 if (playSound) prepareAudio()
@@ -167,6 +169,9 @@ class MjAnimationView constructor(
                     restartAudio()
                     codec = createDecoder(source.format, ds, preferSw = true, failedName = null)
                     codec.start()
+                    // 硬解失败、软解可用：记住偏好，这台设备之后直接软解
+                    context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                        .edit().putBoolean(KEY_PREFER_SW, true).apply()
                     SimpleLog.d(TAG, "Retrying with software decoder")
                     playLoop(codec, source.extractor)
                 } catch (e2: Exception) {
@@ -503,6 +508,8 @@ class MjAnimationView constructor(
     companion object {
         private const val TAG = "MjAnimationView"
         private const val TIMEOUT_US = 10_000L
+        private const val PREFS_NAME = "settings"
+        private const val KEY_PREFER_SW = "prefer_sw_decoder"
 
         const val ASSET_DROP = "animations/mj-drop-dual-mask.mp4"
         const val ASSET_SWING = "animations/mj-swing-dual-mask.mp4"
