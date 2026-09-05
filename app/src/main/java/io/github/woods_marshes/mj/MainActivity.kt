@@ -10,7 +10,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -33,10 +32,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,19 +43,22 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.woods_marshes.mj.data.SettingsRepository
 import io.github.woods_marshes.mj.service.MjAccessibilityService
 import io.github.woods_marshes.mj.ui.theme.MjTheme
 import io.github.woods_marshes.mj.view.MjAnimationView
-import androidx.core.content.edit
-import androidx.core.net.toUri
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        SettingsRepository.start(this)
         setContent {
             MjTheme {
                 MainScreen()
@@ -69,23 +71,19 @@ class MainActivity : ComponentActivity() {
 private fun MainScreen() {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val prefs = remember {
-        context.getSharedPreferences(MjAccessibilityService.PREFS_NAME, Context.MODE_PRIVATE)
-    }
-    var serviceEnabled by remember { mutableStateOf(isAccessibilityServiceEnabled(context)) }
-    var soundEnabled by remember { mutableStateOf(prefs.getBoolean(MjAccessibilityService.KEY_SOUND_ENABLED, true)) }
-    var preferSw by remember { mutableStateOf(prefs.getBoolean(MjAnimationView.KEY_PREFER_SW, false)) }
-    var testAnimationAsset by remember { mutableStateOf<String?>(null) }
-    var showDisclaimer by remember {
-        mutableStateOf(!prefs.getBoolean(MjAccessibilityService.KEY_DISCLAIMER_AGREED, false))
-    }
+    val scope = rememberCoroutineScope()
 
-    // 从系统设置返回时自动刷新服务开启状态与解码器偏好
+    val settings by SettingsRepository.settings.collectAsStateWithLifecycle(
+        initialValue = SettingsRepository.settings.value
+    )
+    var serviceEnabled by remember { mutableStateOf(isAccessibilityServiceEnabled(context)) }
+    var testAnimationAsset by remember { mutableStateOf<String?>(null) }
+
+    // 从系统设置返回时自动刷新服务开启状态
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 serviceEnabled = isAccessibilityServiceEnabled(context)
-                preferSw = prefs.getBoolean(MjAnimationView.KEY_PREFER_SW, false)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -146,12 +144,9 @@ private fun MainScreen() {
                             modifier = Modifier.weight(1f)
                         )
                         Switch(
-                            checked = soundEnabled,
-                            onCheckedChange = {
-                                soundEnabled = it
-                                prefs.edit {
-                                    putBoolean(MjAccessibilityService.KEY_SOUND_ENABLED, it)
-                                }
+                            checked = settings.soundEnabled,
+                            onCheckedChange = { value ->
+                                scope.launch { SettingsRepository.setSoundEnabled(context, value) }
                             }
                         )
                     }
@@ -162,23 +157,17 @@ private fun MainScreen() {
                             modifier = Modifier.weight(1f)
                         )
                         FilterChip(
-                            selected = !preferSw,
+                            selected = !settings.preferSwDecoder,
                             onClick = {
-                                preferSw = false
-                                prefs.edit {
-                                    putBoolean(MjAnimationView.KEY_PREFER_SW, false)
-                                }
+                                scope.launch { SettingsRepository.setPreferSwDecoder(context, false) }
                             },
                             label = { Text(text = stringResource(R.string.decoder_hw)) }
                         )
                         Spacer(Modifier.width(8.dp))
                         FilterChip(
-                            selected = preferSw,
+                            selected = settings.preferSwDecoder,
                             onClick = {
-                                preferSw = true
-                                prefs.edit {
-                                    putBoolean(MjAnimationView.KEY_PREFER_SW, true)
-                                }
+                                scope.launch { SettingsRepository.setPreferSwDecoder(context, true) }
                             },
                             label = { Text(text = stringResource(R.string.decoder_sw)) }
                         )
@@ -255,7 +244,7 @@ private fun MainScreen() {
                     MjAnimationView(
                         ctx,
                         animationAsset = asset,
-                        playSound = soundEnabled,
+                        playSound = settings.soundEnabled,
                         onFinished = { testAnimationAsset = null }
                     )
                 }
@@ -264,7 +253,7 @@ private fun MainScreen() {
     }
 
     // 首次启动免责声明，确认后不再显示
-    if (showDisclaimer) {
+    if (!settings.disclaimerAgreed) {
         AlertDialog(
             onDismissRequest = { /* 必须点击同意才能关闭 */ },
             title = { Text(text = stringResource(R.string.dialog_disclaimer_title)) },
@@ -276,10 +265,7 @@ private fun MainScreen() {
             },
             confirmButton = {
                 TextButton(onClick = {
-                    prefs.edit {
-                        putBoolean(MjAccessibilityService.KEY_DISCLAIMER_AGREED, true)
-                    }
-                    showDisclaimer = false
+                    scope.launch { SettingsRepository.setDisclaimerAgreed(context, true) }
                 }) {
                     Text(text = stringResource(R.string.dialog_disclaimer_confirm))
                 }

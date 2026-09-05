@@ -9,6 +9,7 @@ import android.os.SystemClock
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import io.github.woods_marshes.mj.data.SettingsRepository
 import io.github.woods_marshes.mj.utils.SimpleLog
 import io.github.woods_marshes.mj.view.MjAnimationView
 
@@ -49,6 +50,7 @@ class MjAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
+        SettingsRepository.start(this)
         SimpleLog.d(TAG, "Mj accessibility service connected")
     }
 
@@ -283,8 +285,7 @@ class MjAccessibilityService : AccessibilityService() {
         nextAnimationIndex++
         SimpleLog.d(TAG, "Trigger animation: $asset")
 
-        val soundEnabled = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-            .getBoolean(KEY_SOUND_ENABLED, true)
+        val soundEnabled = SettingsRepository.settings.value.soundEnabled
         val view = MjAnimationView(
             this,
             animationAsset = asset,
@@ -338,10 +339,6 @@ class MjAccessibilityService : AccessibilityService() {
 
         /** 窗口切换瞬态期（焦点/树未就绪）过后再做判决的延迟 */
         private const val WINDOW_CHECK_DELAY_MS = 600L
-
-        const val PREFS_NAME = "settings"
-        const val KEY_SOUND_ENABLED = "sound_enabled"
-        const val KEY_DISCLAIMER_AGREED = "disclaimer_agreed"
 
         // "send" 要求词边界（前后不是字母），避免匹配 descend/resend 之类
         private val SEND_TOKEN = Regex(

@@ -23,6 +23,7 @@ import android.util.AttributeSet
 import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import io.github.woods_marshes.mj.data.SettingsRepository
 import io.github.woods_marshes.mj.utils.SimpleLog
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -113,6 +114,7 @@ class MjAnimationView constructor(
 
         private var scaleX = 1f
         private var scaleY = 1f
+        private var transformLogged = false
 
         fun cancel() {
             cancelled = true
@@ -145,8 +147,7 @@ class MjAnimationView constructor(
                 computeQuadScale(source.colorWidth.toFloat(), source.height.toFloat())
 
                 // 第一次尝试：系统默认解码器（通常硬解）；该设备曾硬解失败则直接软解
-                val preferSw = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                    .getBoolean(KEY_PREFER_SW, false)
+                val preferSw = SettingsRepository.settings.value.preferSwDecoder
                 codec = createDecoder(source.format, decoderSurface, preferSw = preferSw, failedName = null)
                 codec.start()
 
@@ -171,9 +172,9 @@ class MjAnimationView constructor(
                     restartAudio()
                     codec = createDecoder(source.format, ds, preferSw = true, failedName = null)
                     codec.start()
+                    transformLogged = false
                     // 硬解失败、软解可用：记住偏好，这台设备之后直接软解
-                    context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                        .edit().putBoolean(KEY_PREFER_SW, true).apply()
+                    SettingsRepository.setPreferSwDecoder(context, true)
                     SimpleLog.d(TAG, "Retrying with software decoder")
                     playLoop(codec, source.extractor)
                 } catch (e2: Exception) {
@@ -195,6 +196,7 @@ class MjAnimationView constructor(
             var eosQueued = false
             var startPtsUs = Long.MIN_VALUE
             var startNanos = 0L
+            val decoderStartedAtMs = SystemClock.elapsedRealtime()
 
             while (!cancelled) {
                 if (!eosQueued) {
@@ -236,7 +238,17 @@ class MjAnimationView constructor(
                     drawFrame()
                     if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
                 } else if (outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                    SimpleLog.d(TAG, "Decoder output format changed")
+                    SimpleLog.d(TAG, "Decoder output format changed: ${codec.outputFormat}")
+                }
+
+                // 某些厂商硬解码器能够成功 configure/start，却永远不给输出帧。
+                // 主动判定首帧超时，抛出异常交给外层完整重建为软件解码器。
+                if (startPtsUs == Long.MIN_VALUE &&
+                    SystemClock.elapsedRealtime() - decoderStartedAtMs >= FIRST_FRAME_TIMEOUT_MS
+                ) {
+                    throw IllegalStateException(
+                        "Decoder ${codec.name} produced no frame within ${FIRST_FRAME_TIMEOUT_MS}ms"
+                    )
                 }
             }
         }
@@ -272,6 +284,13 @@ class MjAnimationView constructor(
                 videoHeight = tmp
             }
             val mime = requireNotNull(format.getString(MediaFormat.KEY_MIME))
+            SimpleLog.d(
+                TAG,
+                "Video: $mime ${format.getInteger(MediaFormat.KEY_WIDTH)}x${format.getInteger(MediaFormat.KEY_HEIGHT)}" +
+                    " range=" + (if (format.containsKey(MediaFormat.KEY_COLOR_RANGE)) format.getInteger(MediaFormat.KEY_COLOR_RANGE) else "?") +
+                    " std=" + (if (format.containsKey(MediaFormat.KEY_COLOR_STANDARD)) format.getInteger(MediaFormat.KEY_COLOR_STANDARD) else "?") +
+                    " transfer=" + (if (format.containsKey(MediaFormat.KEY_COLOR_TRANSFER)) format.getInteger(MediaFormat.KEY_COLOR_TRANSFER) else "?")
+            )
             return VideoSource(extractor, format, videoWidth / 2, videoHeight, mime)
         }
 
@@ -292,6 +311,13 @@ class MjAnimationView constructor(
             GLES20.glUniform2f(uScaleLoc, scaleX, scaleY)
             // 解码器输出的帧布局各不相同，必须应用 SurfaceTexture 提供的变换矩阵
             surfaceTexture?.getTransformMatrix(texMatrix)
+            if (!transformLogged) {
+                transformLogged = true
+                SimpleLog.d(
+                    TAG,
+                    "Transform matrix: " + texMatrix.joinToString(prefix = "[", postfix = "]") { String.format("%.3f", it) }
+                )
+            }
             GLES20.glUniformMatrix4fv(uTexMatrixLoc, 1, false, texMatrix, 0)
             quadBuffer?.let {
                 it.position(0)
@@ -436,7 +462,7 @@ class MjAnimationView constructor(
                         requireNotNull(format.getString(MediaFormat.KEY_MIME))
                     )
                     codec.configure(format, surface, null, 0)
-                    SimpleLog.d(TAG, "Using default decoder")
+                    SimpleLog.d(TAG, "Using default decoder: ${codec.name}")
                     return codec
                 } catch (e: Exception) {
                     SimpleLog.d(TAG, "Default decoder failed: $e")
@@ -514,8 +540,7 @@ class MjAnimationView constructor(
     companion object {
         private const val TAG = "MjAnimationView"
         private const val TIMEOUT_US = 10_000L
-        const val PREFS_NAME = "settings"
-        const val KEY_PREFER_SW = "prefer_sw_decoder"
+        private const val FIRST_FRAME_TIMEOUT_MS = 3_000L
 
         const val ASSET_DROP = "animations/mj-drop-dual-mask.mp4"
         const val ASSET_SWING = "animations/mj-swing-dual-mask.mp4"
@@ -532,23 +557,30 @@ class MjAnimationView constructor(
             attribute vec2 aTexCoord;
             uniform vec2 uScale;
             uniform mat4 uTexMatrix;
-            varying vec2 vTexCoord;
+            varying vec2 vMaskTexCoord;
+            varying vec2 vColorTexCoord;
             void main() {
                 gl_Position = vec4(aPosition * uScale, 0.0, 1.0);
-                // SurfaceTexture 的变换矩阵包含 Y 翻转与解码器私有布局校正
-                vTexCoord = (uTexMatrix * vec4(aTexCoord, 0.0, 1.0)).xy;
+
+                // 先映射到双画面的左/右半区，再分别应用 SurfaceTexture 变换。
+                // 不能先变换完整 UV 再乘 0.5，否则带裁剪缩放/平移的软解矩阵
+                // 会使蒙版和颜色采样错位，细线处表现为不透明黑杠。
+                vec2 maskTexCoord = vec2(aTexCoord.x * 0.5, aTexCoord.y);
+                vec2 colorTexCoord = vec2(aTexCoord.x * 0.5 + 0.5, aTexCoord.y);
+                vMaskTexCoord = (uTexMatrix * vec4(maskTexCoord, 0.0, 1.0)).xy;
+                vColorTexCoord = (uTexMatrix * vec4(colorTexCoord, 0.0, 1.0)).xy;
             }
         """
 
         private const val FRAGMENT_SHADER = """
             #extension GL_OES_EGL_image_external : require
             precision mediump float;
-            varying vec2 vTexCoord;
+            varying vec2 vMaskTexCoord;
+            varying vec2 vColorTexCoord;
             uniform samplerExternalOES uTexture;
             void main() {
-                // 左半边是灰度蒙版，右半边是彩色画面
-                float mask = texture2D(uTexture, vec2(vTexCoord.x * 0.5, vTexCoord.y)).r;
-                vec3 color = texture2D(uTexture, vec2(vTexCoord.x * 0.5 + 0.5, vTexCoord.y)).rgb;
+                float mask = texture2D(uTexture, vMaskTexCoord).r;
+                vec3 color = texture2D(uTexture, vColorTexCoord).rgb;
                 // 预乘 Alpha 输出，配合半透明 Surface 合成时不会出现白边
                 gl_FragColor = vec4(color * mask, mask);
             }
