@@ -508,8 +508,8 @@ class MjAnimationView constructor(
     companion object {
         private const val TAG = "MjAnimationView"
         private const val TIMEOUT_US = 10_000L
-        private const val PREFS_NAME = "settings"
-        private const val KEY_PREFER_SW = "prefer_sw_decoder"
+        const val PREFS_NAME = "settings"
+        const val KEY_PREFER_SW = "prefer_sw_decoder"
 
         const val ASSET_DROP = "animations/mj-drop-dual-mask.mp4"
         const val ASSET_SWING = "animations/mj-swing-dual-mask.mp4"

@@ -19,11 +19,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
@@ -48,6 +50,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.woods_marshes.mj.service.MjAccessibilityService
 import io.github.woods_marshes.mj.ui.theme.MjTheme
 import io.github.woods_marshes.mj.view.MjAnimationView
+import androidx.core.content.edit
+import androidx.core.net.toUri
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -70,16 +74,18 @@ private fun MainScreen() {
     }
     var serviceEnabled by remember { mutableStateOf(isAccessibilityServiceEnabled(context)) }
     var soundEnabled by remember { mutableStateOf(prefs.getBoolean(MjAccessibilityService.KEY_SOUND_ENABLED, true)) }
+    var preferSw by remember { mutableStateOf(prefs.getBoolean(MjAnimationView.KEY_PREFER_SW, false)) }
     var testAnimationAsset by remember { mutableStateOf<String?>(null) }
     var showDisclaimer by remember {
         mutableStateOf(!prefs.getBoolean(MjAccessibilityService.KEY_DISCLAIMER_AGREED, false))
     }
 
-    // 从系统设置返回时自动刷新服务开启状态
+    // 从系统设置返回时自动刷新服务开启状态与解码器偏好
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 serviceEnabled = isAccessibilityServiceEnabled(context)
+                preferSw = prefs.getBoolean(MjAnimationView.KEY_PREFER_SW, false)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -143,12 +149,45 @@ private fun MainScreen() {
                             checked = soundEnabled,
                             onCheckedChange = {
                                 soundEnabled = it
-                                prefs.edit()
-                                    .putBoolean(MjAccessibilityService.KEY_SOUND_ENABLED, it)
-                                    .apply()
+                                prefs.edit {
+                                    putBoolean(MjAccessibilityService.KEY_SOUND_ENABLED, it)
+                                }
                             }
                         )
                     }
+                    Spacer(Modifier.height(12.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = stringResource(R.string.decoder_label),
+                            modifier = Modifier.weight(1f)
+                        )
+                        FilterChip(
+                            selected = !preferSw,
+                            onClick = {
+                                preferSw = false
+                                prefs.edit {
+                                    putBoolean(MjAnimationView.KEY_PREFER_SW, false)
+                                }
+                            },
+                            label = { Text(text = stringResource(R.string.decoder_hw)) }
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        FilterChip(
+                            selected = preferSw,
+                            onClick = {
+                                preferSw = true
+                                prefs.edit {
+                                    putBoolean(MjAnimationView.KEY_PREFER_SW, true)
+                                }
+                            },
+                            label = { Text(text = stringResource(R.string.decoder_sw)) }
+                        )
+                    }
+                    Text(
+                        text = stringResource(R.string.decoder_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     Spacer(Modifier.height(12.dp))
                     Button(
                         onClick = { testAnimationAsset = MjAnimationView.nextAsset() },
@@ -237,9 +276,9 @@ private fun MainScreen() {
             },
             confirmButton = {
                 TextButton(onClick = {
-                    prefs.edit()
-                        .putBoolean(MjAccessibilityService.KEY_DISCLAIMER_AGREED, true)
-                        .apply()
+                    prefs.edit {
+                        putBoolean(MjAccessibilityService.KEY_DISCLAIMER_AGREED, true)
+                    }
                     showDisclaimer = false
                 }) {
                     Text(text = stringResource(R.string.dialog_disclaimer_confirm))
@@ -262,7 +301,7 @@ private fun isAccessibilityServiceEnabled(context: Context): Boolean {
 }
 
 private fun openGitHub(context: Context) {
-    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/woods-marshes/MJ")))
+    context.startActivity(Intent(Intent.ACTION_VIEW, "https://github.com/woods-marshes/MJ".toUri()))
 }
 
 private fun openAppDetailsSettings(context: Context) {

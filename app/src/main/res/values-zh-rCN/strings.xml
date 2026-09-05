@@ -8,6 +8,10 @@
     <string name="btn_enable_accessibility">去系统设置开启</string>
     <string name="btn_test_animation">测试动画</string>
     <string name="pref_sound_label">动画音效</string>
+    <string name="decoder_label">解码器</string>
+    <string name="decoder_hw">硬解</string>
+    <string name="decoder_sw">软解</string>
+    <string name="decoder_hint">部分机型硬解异常时会自动改用软解并记住；也可以在这里手动切换。</string>
     <string name="btn_miui_autostart">自启动管理</string>
     <string name="btn_miui_battery">省电策略</string>
     <string name="miui_suggestion_text">建议 MIUI / HyperOS 等非原生系统开启自启动，并将省电策略改为「无限制」，否则无障碍服务可能被系统回收。</string>

@@ -7,6 +7,10 @@
     <string name="btn_enable_accessibility">Enable in system settings</string>
     <string name="btn_test_animation">Test animation</string>
     <string name="pref_sound_label">Animation sound</string>
+    <string name="decoder_label">Decoder</string>
+    <string name="decoder_hw">Hardware</string>
+    <string name="decoder_sw">Software</string>
+    <string name="decoder_hint">If the animation fails to play on some devices, the app remembers software decoding automatically. You can also switch it here.</string>
     <string name="btn_miui_autostart">Auto-start</string>
     <string name="btn_miui_battery">Battery saver</string>
     <string name="miui_suggestion_text">On MIUI / HyperOS and other non-stock systems, enable auto-start and set the battery policy to \"No restrictions\", otherwise the accessibility service may be killed by the system.</string>
