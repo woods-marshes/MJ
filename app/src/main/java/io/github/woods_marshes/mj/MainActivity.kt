@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.SystemClock
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -31,6 +32,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,6 +49,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.woods_marshes.mj.service.MjAccessibilityService
 import io.github.woods_marshes.mj.ui.theme.MjTheme
 import io.github.woods_marshes.mj.view.MjAnimationView
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -74,7 +77,14 @@ private fun MainScreen() {
         mutableStateOf(!prefs.getBoolean(MjAccessibilityService.KEY_DISCLAIMER_AGREED, false))
     }
 
-    // 从系统设置返回时自动刷新服务开启状态
+    // 从系统设置返回时自动刷新服务开启状态；每秒刷新一次心跳展示
+    var heartbeatTick by remember { mutableStateOf(SystemClock.elapsedRealtime()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            heartbeatTick = SystemClock.elapsedRealtime()
+            delay(1000)
+        }
+    }
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
@@ -94,7 +104,8 @@ private fun MainScreen() {
                 .padding(horizontal = 20.dp, vertical = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // 无障碍服务状态卡
+            // 无障碍服务状态卡：Settings 显示"已开启"不代表服务真的活着，
+            // 结合绑定状态与事件心跳给出三态判定
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(
                     modifier = Modifier
@@ -108,16 +119,26 @@ private fun MainScreen() {
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(Modifier.height(6.dp))
-                    Text(
-                        text = stringResource(
-                            if (serviceEnabled) R.string.status_on else R.string.status_off
-                        ),
-                        style = MaterialTheme.typography.headlineMedium,
-                        color = if (serviceEnabled) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
+                    val bound = MjAccessibilityService.serviceBound
+                    val heartbeatAge = if (MjAccessibilityService.lastHeartbeatElapsed == 0L) {
+                        Long.MAX_VALUE
+                    } else {
+                        heartbeatTick - MjAccessibilityService.lastHeartbeatElapsed
+                    }
+                    val (statusText, statusColor) = when {
+                        !serviceEnabled -> stringResource(R.string.status_off) to
                             MaterialTheme.colorScheme.error
-                        }
+                        !bound -> stringResource(R.string.status_not_bound) to
+                            MaterialTheme.colorScheme.error
+                        heartbeatAge > 8000 -> stringResource(R.string.status_stale, heartbeatAge / 1000) to
+                            MaterialTheme.colorScheme.tertiary
+                        else -> stringResource(R.string.status_on) to
+                            MaterialTheme.colorScheme.primary
+                    }
+                    Text(
+                        text = statusText,
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = statusColor
                     )
                     Spacer(Modifier.height(18.dp))
                     Button(onClick = {

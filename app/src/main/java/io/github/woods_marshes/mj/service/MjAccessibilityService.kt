@@ -1,14 +1,17 @@
 package io.github.woods_marshes.mj.service
 
 import android.accessibilityservice.AccessibilityService
+import android.content.Intent
 import android.graphics.PixelFormat
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.provider.Settings
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.widget.Toast
 import io.github.woods_marshes.mj.utils.SimpleLog
 import io.github.woods_marshes.mj.view.MjAnimationView
 
@@ -49,10 +52,13 @@ class MjAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
+        serviceBound = true
+        lastHeartbeatElapsed = SystemClock.elapsedRealtime()
         SimpleLog.d(TAG, "Mj accessibility service connected")
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        lastHeartbeatElapsed = SystemClock.elapsedRealtime()
         event ?: return
         when (event.eventType) {
             AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> handleTextChanged(event)
@@ -297,6 +303,10 @@ class MjAccessibilityService : AccessibilityService() {
         } catch (e: Exception) {
             SimpleLog.d(TAG, "Add overlay failed: $e")
             animationView = null
+            io.github.woods_marshes.mj.view.ErrorReporter.show(
+                this,
+                "悬浮窗创建失败: ${e::class.java.simpleName}: ${e.message ?: ""}"
+            )
         }
     }
 
@@ -318,8 +328,14 @@ class MjAccessibilityService : AccessibilityService() {
 
     override fun onInterrupt() = Unit
 
+    override fun onUnbind(intent: Intent?): Boolean {
+        serviceBound = false
+        return super.onUnbind(intent)
+    }
+
     override fun onDestroy() {
         mainHandler.removeCallbacksAndMessages(null)
+        serviceBound = false
         hideAnimation()
         super.onDestroy()
     }
@@ -339,6 +355,14 @@ class MjAccessibilityService : AccessibilityService() {
         const val PREFS_NAME = "settings"
         const val KEY_SOUND_ENABLED = "sound_enabled"
         const val KEY_DISCLAIMER_AGREED = "disclaimer_agreed"
+
+        /**
+         * 诊断用：服务绑定状态与最近一次收到事件的时刻。
+         * 国产 ROM 上无障碍可能"设置里显示已开启、实际绑定已死"，
+         * Settings 字符串不可信，以这两个值为准（MainActivity 读取展示）。
+         */
+        @Volatile var serviceBound = false
+        @Volatile var lastHeartbeatElapsed = 0L
 
         // "send" 要求词边界（前后不是字母），避免匹配 descend/resend 之类
         private val SEND_TOKEN = Regex(

@@ -5,6 +5,8 @@
     <string name="status_label">无障碍服务</string>
     <string name="status_on">已开启</string>
     <string name="status_off">未开启</string>
+    <string name="status_not_bound">服务未运行：请关闭后重新打开无障碍开关</string>
+    <string name="status_stale">已开启，但 %1$d 秒无事件响应（可能被系统限制）</string>
     <string name="btn_enable_accessibility">去系统设置开启</string>
     <string name="btn_test_animation">测试动画</string>
     <string name="pref_sound_label">动画音效</string>

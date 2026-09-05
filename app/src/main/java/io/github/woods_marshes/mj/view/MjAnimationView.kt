@@ -5,9 +5,11 @@ import android.graphics.PixelFormat
 import android.graphics.SurfaceTexture
 import android.media.AudioAttributes
 import android.media.MediaCodec
+import android.media.MediaCodecList
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaPlayer
+import android.widget.Toast
 import android.opengl.EGL14
 import android.opengl.EGLConfig
 import android.opengl.EGLContext
@@ -112,7 +114,7 @@ class MjAnimationView constructor(
             var extractor: MediaExtractor? = null
             try {
                 if (!setupEgl(surface)) {
-                    SimpleLog.d(TAG, "EGL setup failed")
+                    reportError("EGL/GPU 初始化失败")
                     return
                 }
                 setupProgram()
@@ -137,7 +139,7 @@ class MjAnimationView constructor(
                     }
                 }
                 if (trackIndex < 0 || format == null) {
-                    SimpleLog.d(TAG, "No video track in $animationAsset")
+                    reportError("视频文件中没有视频轨")
                     return
                 }
                 extractor.selectTrack(trackIndex)
@@ -155,8 +157,7 @@ class MjAnimationView constructor(
                 computeQuadScale(videoWidth / 2f, videoHeight.toFloat())
 
                 val mime = requireNotNull(format.getString(MediaFormat.KEY_MIME))
-                codec = MediaCodec.createDecoderByType(mime)
-                codec.configure(format, decodeSurface, null, 0)
+                codec = createDecoder(mime, format, requireNotNull(decodeSurface))
                 codec.start()
 
                 if (playSound) prepareAudio()
@@ -164,6 +165,7 @@ class MjAnimationView constructor(
                 playLoop(codec, extractor)
             } catch (e: Exception) {
                 SimpleLog.d(TAG, "Play $animationAsset failed: $e")
+                reportError("${e::class.java.simpleName}: ${e.message?.take(100) ?: "未知错误"}")
             } finally {
                 runCatching { codec?.stop() }
                 runCatching { codec?.release() }
@@ -254,6 +256,43 @@ class MjAnimationView constructor(
                 runCatching { audioPlayer?.release() }
                 audioPlayer = null
             }
+        }
+
+        /**
+         * 创建视频解码器：首选系统默认（通常硬解），失败后遍历其他解码器并优先
+         * 谷歌软解（c2.android / OMX.google）——覆盖部分设备硬解码器对特定视频
+         * 参数不兼容的情况（如某些 MTK 机型）。
+         */
+        private fun createDecoder(mime: String, format: MediaFormat, surface: Surface): MediaCodec {
+            try {
+                val codec = MediaCodec.createDecoderByType(mime)
+                codec.configure(format, surface, null, 0)
+                SimpleLog.d(TAG, "Using default decoder")
+                return codec
+            } catch (e: Exception) {
+                SimpleLog.d(TAG, "Default decoder failed: $e")
+            }
+            val candidates = MediaCodecList(MediaCodecList.ALL_CODECS).codecInfos
+                .filter { !it.isEncoder && runCatching { it.getCapabilitiesForType(mime) }.isSuccess }
+                .map { it.name }
+            for (name in candidates) {
+                try {
+                    SimpleLog.d(TAG, "Trying decoder: $name")
+                    val codec = MediaCodec.createByCodecName(name)
+                    codec.configure(format, surface, null, 0)
+                    SimpleLog.d(TAG, "Using decoder: $name")
+                    return codec
+                } catch (e: Exception) {
+                    SimpleLog.d(TAG, "Decoder $name failed: $e")
+                }
+            }
+            throw IllegalStateException("no usable decoder for $mime")
+        }
+
+        /** 渲染失败时弹出错误报告窗口（release 包日志不可见，这是主要诊断手段）。 */
+        private fun reportError(message: String) {
+            SimpleLog.d(TAG, "ERROR: $message")
+            mainHandler.post { ErrorReporter.show(context, message) }
         }
 
         private fun drawFrame() {
