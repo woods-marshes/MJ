@@ -97,8 +97,10 @@ class MjAnimationView constructor(
         private var program = 0
         private var uScaleLoc = 0
         private var uTextureLoc = 0
+        private var uTexMatrixLoc = 0
         private var aPositionLoc = 0
         private var aTexCoordLoc = 0
+        private val texMatrix = FloatArray(16)
         private var quadBuffer: FloatBuffer? = null
         private var uvBuffer: FloatBuffer? = null
 
@@ -288,6 +290,9 @@ class MjAnimationView constructor(
             GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textureId)
             GLES20.glUniform1i(uTextureLoc, 0)
             GLES20.glUniform2f(uScaleLoc, scaleX, scaleY)
+            // 解码器输出的帧布局各不相同，必须应用 SurfaceTexture 提供的变换矩阵
+            surfaceTexture?.getTransformMatrix(texMatrix)
+            GLES20.glUniformMatrix4fv(uTexMatrixLoc, 1, false, texMatrix, 0)
             quadBuffer?.let {
                 it.position(0)
                 GLES20.glEnableVertexAttribArray(aPositionLoc)
@@ -350,6 +355,7 @@ class MjAnimationView constructor(
 
             uScaleLoc = GLES20.glGetUniformLocation(program, "uScale")
             uTextureLoc = GLES20.glGetUniformLocation(program, "uTexture")
+            uTexMatrixLoc = GLES20.glGetUniformLocation(program, "uTexMatrix")
             aPositionLoc = GLES20.glGetAttribLocation(program, "aPosition")
             aTexCoordLoc = GLES20.glGetAttribLocation(program, "aTexCoord")
             quadBuffer = floatBufferOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f)
@@ -525,10 +531,12 @@ class MjAnimationView constructor(
             attribute vec2 aPosition;
             attribute vec2 aTexCoord;
             uniform vec2 uScale;
+            uniform mat4 uTexMatrix;
             varying vec2 vTexCoord;
             void main() {
                 gl_Position = vec4(aPosition * uScale, 0.0, 1.0);
-                vTexCoord = vec2(aTexCoord.x, 1.0 - aTexCoord.y);
+                // SurfaceTexture 的变换矩阵包含 Y 翻转与解码器私有布局校正
+                vTexCoord = (uTexMatrix * vec4(aTexCoord, 0.0, 1.0)).xy;
             }
         """
 
