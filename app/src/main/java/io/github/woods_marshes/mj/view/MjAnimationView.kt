@@ -9,7 +9,6 @@ import android.media.MediaCodecList
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaPlayer
-import android.widget.Toast
 import android.opengl.EGL14
 import android.opengl.EGLConfig
 import android.opengl.EGLContext
@@ -36,6 +35,10 @@ import kotlin.math.min
  * MediaCodec 解码出每一帧后，在片元着色器里把左半边的灰度值作为 Alpha、
  * 右半边作为颜色实时合成；SurfaceView 以透明格式置顶叠加，
  * 最终呈现真正带透明通道的动画。
+ *
+ * 解码器选择：首选系统默认（通常硬解）；创建/配置失败，或播放中途运行期失败时，
+ * 自动回退谷歌软解（c2.android / OMX.google）重建解码器重试——部分设备
+ * （尤其 MTK）硬解码器对特定视频参数不兼容。两次都失败才弹出错误报告。
  */
 class MjAnimationView constructor(
     context: Context,
@@ -68,6 +71,15 @@ class MjAnimationView constructor(
             }
         })
     }
+
+    /** 已打开并选好视频轨的媒体源。 */
+    private class VideoSource(
+        val extractor: MediaExtractor,
+        val format: MediaFormat,
+        val colorWidth: Int, // 彩色画面宽度（视频宽的一半）
+        val height: Int,
+        val mime: String,
+    )
 
     private inner class Player(
         private val surface: Surface,
@@ -111,7 +123,7 @@ class MjAnimationView constructor(
 
         override fun run() {
             var codec: MediaCodec? = null
-            var extractor: MediaExtractor? = null
+            var source: VideoSource? = null
             try {
                 if (!setupEgl(surface)) {
                     reportError("EGL/GPU 初始化失败")
@@ -124,55 +136,40 @@ class MjAnimationView constructor(
                 surfaceTexture = texture
                 decodeSurface = Surface(texture)
 
-                extractor = MediaExtractor()
-                context.assets.openFd(animationAsset).use { afd ->
-                    extractor.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
-                }
-                var trackIndex = -1
-                var format: MediaFormat? = null
-                for (i in 0 until extractor.trackCount) {
-                    val f = extractor.getTrackFormat(i)
-                    if (f.getString(MediaFormat.KEY_MIME)?.startsWith("video/") == true) {
-                        trackIndex = i
-                        format = f
-                        break
-                    }
-                }
-                if (trackIndex < 0 || format == null) {
-                    reportError("视频文件中没有视频轨")
-                    return
-                }
-                extractor.selectTrack(trackIndex)
-
-                var videoWidth = format.getInteger(MediaFormat.KEY_WIDTH)
-                var videoHeight = format.getInteger(MediaFormat.KEY_HEIGHT)
-                val rotation =
-                    if (format.containsKey(MediaFormat.KEY_ROTATION)) format.getInteger(MediaFormat.KEY_ROTATION) else 0
-                if (rotation == 90 || rotation == 270) {
-                    val tmp = videoWidth
-                    videoWidth = videoHeight
-                    videoHeight = tmp
-                }
+                source = openVideo()
                 // 彩色画面只占视频右半边，显示宽高按一半计算
-                computeQuadScale(videoWidth / 2f, videoHeight.toFloat())
+                computeQuadScale(source.colorWidth.toFloat(), source.height.toFloat())
 
-                val mime = requireNotNull(format.getString(MediaFormat.KEY_MIME))
-                codec = createDecoder(mime, format, requireNotNull(decodeSurface))
+                // 第一次尝试：系统默认解码器（通常硬解）
+                codec = createDecoder(source.format, decodeSurface, preferSw = false, failedName = null)
                 codec.start()
 
                 if (playSound) prepareAudio()
-
-                playLoop(codec, extractor)
+                playLoop(codec, source.extractor)
             } catch (e: Exception) {
-                SimpleLog.d(TAG, "Play $animationAsset failed: $e")
-                reportError("${e::class.java.simpleName}: ${e.message?.take(100) ?: "未知错误"}")
+                if (cancelled) return
+                SimpleLog.d(TAG, "Playback attempt failed: $e")
+                // 硬解运行期失败：重开视频源、强制软解重建解码器再完整重试一次
+                try {
+                    runCatching { codec?.stop() }
+                    runCatching { codec?.release() }
+                    codec = null
+                    runCatching { source?.extractor?.release() }
+                    source = openVideo()
+                    computeQuadScale(source.colorWidth.toFloat(), source.height.toFloat())
+                    restartAudio()
+                    codec = createDecoder(source.format, decodeSurface, preferSw = true, failedName = null)
+                    codec.start()
+                    SimpleLog.d(TAG, "Retrying with software decoder")
+                    playLoop(codec, source.extractor)
+                } catch (e2: Exception) {
+                    reportError("${e2::class.java.simpleName}: ${e2.message?.take(100) ?: "未知错误"}")
+                }
             } finally {
                 runCatching { codec?.stop() }
                 runCatching { codec?.release() }
-                runCatching { extractor?.release() }
-                runCatching { audioPlayer?.let { if (it.isPlaying) it.stop() } }
-                runCatching { audioPlayer?.release() }
-                audioPlayer = null
+                runCatching { source?.extractor?.release() }
+                releaseAudio()
                 releaseGl()
                 // 因视图被移除而中断时不再回调，避免对已移除的视图重复操作
                 if (!cancelled) mainHandler.post { onFinished?.invoke() }
@@ -230,69 +227,44 @@ class MjAnimationView constructor(
             }
         }
 
+        private fun openVideo(): VideoSource {
+            val extractor = MediaExtractor()
+            context.assets.openFd(animationAsset).use { afd ->
+                extractor.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+            }
+            var trackIndex = -1
+            var format: MediaFormat? = null
+            for (i in 0 until extractor.trackCount) {
+                val f = extractor.getTrackFormat(i)
+                if (f.getString(MediaFormat.KEY_MIME)?.startsWith("video/") == true) {
+                    trackIndex = i
+                    format = f
+                    break
+                }
+            }
+            if (trackIndex < 0 || format == null) {
+                extractor.release()
+                throw IllegalStateException("视频文件中没有视频轨")
+            }
+            extractor.selectTrack(trackIndex)
+
+            var videoWidth = format.getInteger(MediaFormat.KEY_WIDTH)
+            var videoHeight = format.getInteger(MediaFormat.KEY_HEIGHT)
+            val rotation =
+                if (format.containsKey(MediaFormat.KEY_ROTATION)) format.getInteger(MediaFormat.KEY_ROTATION) else 0
+            if (rotation == 90 || rotation == 270) {
+                val tmp = videoWidth
+                videoWidth = videoHeight
+                videoHeight = tmp
+            }
+            val mime = requireNotNull(format.getString(MediaFormat.KEY_MIME))
+            return VideoSource(extractor, format, videoWidth / 2, videoHeight, mime)
+        }
+
         private fun computeQuadScale(colorWidth: Float, colorHeight: Float) {
             val fit = min(viewWidth / colorWidth, viewHeight / colorHeight)
             scaleX = colorWidth * fit / viewWidth
             scaleY = colorHeight * fit / viewHeight
-        }
-
-        /** 用 MediaPlayer 只取视频里的音频轨（不给 Surface，视频部分自动丢弃）。 */
-        private fun prepareAudio() {
-            try {
-                audioPlayer = MediaPlayer().apply {
-                    context.assets.openFd(animationAsset).use { afd ->
-                        setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
-                    }
-                    setAudioAttributes(
-                        AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_MEDIA)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE)
-                            .build()
-                    )
-                    prepare()
-                }
-            } catch (e: Exception) {
-                SimpleLog.d(TAG, "Audio prepare failed: $e")
-                runCatching { audioPlayer?.release() }
-                audioPlayer = null
-            }
-        }
-
-        /**
-         * 创建视频解码器：首选系统默认（通常硬解），失败后遍历其他解码器并优先
-         * 谷歌软解（c2.android / OMX.google）——覆盖部分设备硬解码器对特定视频
-         * 参数不兼容的情况（如某些 MTK 机型）。
-         */
-        private fun createDecoder(mime: String, format: MediaFormat, surface: Surface): MediaCodec {
-            try {
-                val codec = MediaCodec.createDecoderByType(mime)
-                codec.configure(format, surface, null, 0)
-                SimpleLog.d(TAG, "Using default decoder")
-                return codec
-            } catch (e: Exception) {
-                SimpleLog.d(TAG, "Default decoder failed: $e")
-            }
-            val candidates = MediaCodecList(MediaCodecList.ALL_CODECS).codecInfos
-                .filter { !it.isEncoder && runCatching { it.getCapabilitiesForType(mime) }.isSuccess }
-                .map { it.name }
-            for (name in candidates) {
-                try {
-                    SimpleLog.d(TAG, "Trying decoder: $name")
-                    val codec = MediaCodec.createByCodecName(name)
-                    codec.configure(format, surface, null, 0)
-                    SimpleLog.d(TAG, "Using decoder: $name")
-                    return codec
-                } catch (e: Exception) {
-                    SimpleLog.d(TAG, "Decoder $name failed: $e")
-                }
-            }
-            throw IllegalStateException("no usable decoder for $mime")
-        }
-
-        /** 渲染失败时弹出错误报告窗口（release 包日志不可见，这是主要诊断手段）。 */
-        private fun reportError(message: String) {
-            SimpleLog.d(TAG, "ERROR: $message")
-            mainHandler.post { ErrorReporter.show(context, message) }
         }
 
         private fun drawFrame() {
@@ -392,6 +364,95 @@ class MjAnimationView constructor(
             GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
             GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
             return id
+        }
+
+        /** 用 MediaPlayer 只取视频里的音频轨（不给 Surface，视频部分自动丢弃）。 */
+        private fun prepareAudio() {
+            try {
+                audioPlayer = MediaPlayer().apply {
+                    context.assets.openFd(animationAsset).use { afd ->
+                        setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+                    }
+                    setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_MEDIA)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE)
+                            .build()
+                    )
+                    prepare()
+                }
+            } catch (e: Exception) {
+                SimpleLog.d(TAG, "Audio prepare failed: $e")
+                runCatching { audioPlayer?.release() }
+                audioPlayer = null
+            }
+        }
+
+        private fun releaseAudio() {
+            runCatching { audioPlayer?.let { if (it.isPlaying) it.stop() } }
+            runCatching { audioPlayer?.release() }
+            audioPlayer = null
+            audioStarted = false
+        }
+
+        private fun restartAudio() {
+            releaseAudio()
+            if (playSound) prepareAudio()
+        }
+
+        /**
+         * 创建视频解码器。
+         *
+         * @param preferSw true 时跳过系统默认（硬解）直接按"软解优先"排序尝试，
+         * 用于硬解运行期失败后的整管线重试
+         */
+        private fun createDecoder(
+            format: MediaFormat,
+            surface: Surface,
+            preferSw: Boolean,
+            failedName: String?,
+        ): MediaCodec {
+            if (!preferSw) {
+                try {
+                    val codec = MediaCodec.createDecoderByType(
+                        requireNotNull(format.getString(MediaFormat.KEY_MIME))
+                    )
+                    codec.configure(format, surface, null, 0)
+                    SimpleLog.d(TAG, "Using default decoder")
+                    return codec
+                } catch (e: Exception) {
+                    SimpleLog.d(TAG, "Default decoder failed: $e")
+                }
+            }
+            val mime = requireNotNull(format.getString(MediaFormat.KEY_MIME))
+            val candidates = MediaCodecList(MediaCodecList.ALL_CODECS).codecInfos
+                .filter { !it.isEncoder && runCatching { it.getCapabilitiesForType(mime) }.isSuccess }
+                .map { it.name }
+                .filter { it != failedName }
+                .sortedByDescending { name ->
+                    when {
+                        name.contains("sw") || name.contains("google") || name.startsWith("c2.android") -> 2
+                        else -> 1
+                    }
+                }
+            for (name in candidates) {
+                try {
+                    SimpleLog.d(TAG, "Trying decoder: $name")
+                    val codec = MediaCodec.createByCodecName(name)
+                    codec.configure(format, surface, null, 0)
+                    SimpleLog.d(TAG, "Using decoder: $name")
+                    return codec
+                } catch (e: Exception) {
+                    SimpleLog.d(TAG, "Decoder $name failed: $e")
+                }
+            }
+            throw IllegalStateException("no usable decoder for $mime")
+        }
+
+        /** 渲染失败时弹出错误报告窗口（release 包日志不可见，这是主要诊断手段）。 */
+        private fun reportError(message: String) {
+            SimpleLog.d(TAG, "ERROR: $message")
+            mainHandler.post { ErrorReporter.show(context, message) }
         }
 
         private fun releaseGl() {
