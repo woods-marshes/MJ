@@ -1,0 +1,38 @@
+# Dependabot 配置：自动跟踪 Gradle 依赖 / GitHub Actions 更新
+version: 2
+updates:
+  # Gradle 依赖与插件（会读取 gradle/libs.versions.toml 版本目录）
+  - package-ecosystem: "gradle"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+    open-pull-requests-limit: 10
+    groups:
+      # 把同一主题的依赖合并成一个 PR，减少噪音
+      kotlin:
+        patterns:
+          - "org.jetbrains.kotlin*"
+          - "org.jetbrains.kotlinx*"
+      androidx:
+        patterns:
+          - "androidx*"
+      gradle-plugins:
+        dependency-type: "development"
+        patterns:
+          - "com.android.tools.build*"
+          - "org.gradle.toolchains*"
+
+  # GitHub Actions 工作流
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+    open-pull-requests-limit: 10
+    groups:
+      ci-actions:
+        patterns:
+          - "*"
