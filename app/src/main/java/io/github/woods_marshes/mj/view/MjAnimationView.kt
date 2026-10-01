@@ -28,6 +28,7 @@ import io.github.woods_marshes.mj.utils.SimpleLog
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
+import kotlin.math.max
 import kotlin.math.min
 
 /**
@@ -51,7 +52,6 @@ class MjAnimationView constructor(
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var player: Player? = null
-    private var started = false
 
     init {
         // 必须在 Surface 创建之前设置为置顶的透明层
@@ -61,12 +61,20 @@ class MjAnimationView constructor(
             override fun surfaceCreated(holder: SurfaceHolder) = Unit
 
             override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-                if (started) return
-                started = true
-                player = Player(holder.surface, width, height).also { it.start() }
+                if (width <= 0 || height <= 0) return
+                // 已有播放器 = 尺寸变化（横竖屏旋转、窗口重排）：换视口继续播；
+                // 没有播放器 = 首次就绪，或 surface 被系统销毁重建后重新起播
+                val existing = player
+                if (existing != null) {
+                    existing.resize(width, height)
+                } else {
+                    player = Player(holder.surface, width, height).also { it.start() }
+                }
             }
 
             override fun surfaceDestroyed(holder: SurfaceHolder) {
+                // surface 会被系统销毁重建（旋转/切后台），必须清掉旧播放器：
+                // 否则重建后的 surfaceChanged 找不到播放器且无人起播，画面永远空白
                 player?.cancel()
                 player = null
             }
@@ -84,9 +92,24 @@ class MjAnimationView constructor(
 
     private inner class Player(
         private val surface: Surface,
-        private val viewWidth: Int,
-        private val viewHeight: Int,
+        viewWidth: Int,
+        viewHeight: Int,
     ) : Thread("MjAnimationPlayer") {
+
+        // surface 尺寸会在播放中变化（旋转/重排）：渲染线程读，主线程 resize 写
+        @Volatile
+        private var viewWidth = viewWidth
+        @Volatile
+        private var viewHeight = viewHeight
+        // 素材尺寸与缩放跟随视口重算，跨线程读写
+        @Volatile
+        private var colorWidth = 0f
+        @Volatile
+        private var colorHeight = 0f
+        @Volatile
+        private var scaleX = 1f
+        @Volatile
+        private var scaleY = 1f
 
         @Volatile
         private var cancelled = false
@@ -112,8 +135,6 @@ class MjAnimationView constructor(
         private var audioPlayer: MediaPlayer? = null
         private var audioStarted = false
 
-        private var scaleX = 1f
-        private var scaleY = 1f
         private var transformLogged = false
 
         fun cancel() {
@@ -123,6 +144,16 @@ class MjAnimationView constructor(
             } catch (_: InterruptedException) {
                 Thread.currentThread().interrupt()
             }
+        }
+
+        /** surface 尺寸变化（旋转/窗口重排）时换视口并重算缩放，避免画面停留在旧尺寸上。 */
+        fun resize(width: Int, height: Int) {
+            if (width <= 0 || height <= 0) return
+            if (width == viewWidth && height == viewHeight) return
+            viewWidth = width
+            viewHeight = height
+            if (colorWidth > 0f) computeQuadScale(colorWidth, colorHeight)
+            SimpleLog.d(TAG, "Surface resized: ${width}x$height")
         }
 
         override fun run() {
@@ -295,7 +326,15 @@ class MjAnimationView constructor(
         }
 
         private fun computeQuadScale(colorWidth: Float, colorHeight: Float) {
-            val fit = min(viewWidth / colorWidth, viewHeight / colorHeight)
+            this.colorWidth = colorWidth
+            this.colorHeight = colorHeight
+            val contain = min(viewWidth / colorWidth, viewHeight / colorHeight)
+            // 横屏时竖屏素材按 contain 会缩成一条只占 ~21% 屏宽的窄带：
+            // 改为让素材宽度对齐屏幕短边，上下留白交由视口裁掉，
+            // 角色相对屏幕的占比与竖屏一致，进出场裁切都落在留白区；
+            // 比屏幕更宽的素材则仍退化为 contain，不会放大裁切。
+            val fit =
+                if (viewHeight >= viewWidth) contain else max(contain, viewHeight / colorWidth)
             scaleX = colorWidth * fit / viewWidth
             scaleY = colorHeight * fit / viewHeight
         }
